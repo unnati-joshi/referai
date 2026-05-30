@@ -5,7 +5,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -10910,8 +10910,6 @@ def extract_with_deepseek(resume_text):
         return None
 
 
-
-
 def extract_resume_regex_fallback(text):
     """Best-effort regex extraction when DeepSeek is unavailable."""
     skill_keywords = re.findall(
@@ -10937,9 +10935,6 @@ def extract_resume_regex_fallback(text):
         "current_role": "",
         "summary": summary[:200],
     }
-
-
-
 
 
 _EXTRACT_JOB_PROMPT = """You are a job posting parser. Extract structured information from the job description below.
@@ -10968,8 +10963,6 @@ Rules:
 
 Job description:
 """
-
-
 
 
 def extract_job_with_deepseek(job_text):
@@ -11132,14 +11125,6 @@ def _upsert_job(job):
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
 PHONE_RE = re.compile(r"^\+?[1-9]\d{9,14}$")
 
-AI_AGENT_WEIGHTS = {
-    "Career Discovery Agent": 0.28,
-    "Skill Gap Agent": 0.26,
-    "Opportunity Access Agent": 0.2,
-    "Work Simulation Agent": 0.16,
-    "Inclusion Guardrail Agent": 0.1,
-}
-
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
 
@@ -11150,9 +11135,8 @@ DEEPSEEK_MODEL = "deepseek-chat"
 GITHUB_PAT = os.environ.get("GITHUB_PAT", "")
 GITHUB_API = "https://api.github.com"
 
-# Web search — Google Custom Search API (free 100 queries/day)
-# Create CSE: https://programmablesearchengine.google.com/
-# Get API key: https://console.cloud.google.com/apis/credentials
+RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
+JSEARCH_URL = "https://jsearch.p.rapidapi.com/search"
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "referai.db")
 
@@ -11308,13 +11292,6 @@ def cosine_similarity(left, right):
     return round(dot / max(left_norm * right_norm, 1), 3)
 
 
-def rank_keywords(source, target, limit=5):
-    source_tokens = set(text_tokens(source))
-    target_tokens = [token for token in text_tokens(target) if token not in source_tokens]
-    ranked = sorted(set(target_tokens), key=lambda token: target_tokens.count(token), reverse=True)
-    return ranked[:limit]
-
-
 def free_llm_generate(prompt, timeout=1.0):
     payload = json.dumps(
         {
@@ -11367,7 +11344,12 @@ def is_valid_phone(phone):
 
 
 def normalize_phone(phone):
-    return (phone or "").replace(" ", "").replace("-", "")
+    cleaned = (phone or "").replace(" ", "").replace("-", "")
+    if re.fullmatch(r"\d{10}", cleaned):
+        return f"+91{cleaned}"
+    if re.fullmatch(r"91\d{10}", cleaned):
+        return f"+{cleaned}"
+    return cleaned
 
 
 def extract_emails(text):
@@ -11393,7 +11375,7 @@ def fetch_job_page(job_url):
     req = Request(
         job_url,
         headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ReferAI/1.0",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ReferIn/1.0",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         },
     )
@@ -11528,16 +11510,15 @@ def parse_live_job(job_url):
     job["phones"] = scraped.get("phones", [])
     job["company_url"] = scraped.get("company_url")
     job["contact_routes"] = build_contact_routes(job)
-    job["profiles"] = search_public_profiles(job)
+    job["profiles"] = search_candidate_profiles(job)
     job["extraction_notes"] = extraction_notes
     job["is_live_extract"] = True
     return job
 
 
-
 def fetch_public_search(query):
     search_url = f"https://www.bing.com/search?format=rss&q={quote(query)}"
-    req = Request(search_url, headers={"User-Agent": "Mozilla/5.0 ReferAI/1.0"})
+    req = Request(search_url, headers={"User-Agent": "Mozilla/5.0 ReferIn/1.0"})
     with urlopen(req, timeout=8) as response:
         return response.read().decode("utf-8", errors="ignore")
 
@@ -11547,20 +11528,12 @@ def fetch_brave_search(query):
     req = Request(
         search_url,
         headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ReferAI/1.0",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ReferIn/1.0",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         },
     )
     with urlopen(req, timeout=8) as response:
         return response.read().decode("utf-8", errors="ignore")
-
-
-def decode_result_url(url):
-    if "uddg=" in url:
-        encoded = re.search(r"uddg=([^&]+)", url)
-        if encoded:
-            return unquote(encoded.group(1))
-    return html.unescape(url)
 
 
 def decode_js_string(value):
@@ -11606,25 +11579,6 @@ def profile_company_from_title(title):
 def company_slug(company):
     slug = re.sub(r"[^a-z0-9]+", "-", (company or "").lower()).strip("-")
     return slug
-
-
-def company_page_candidates(job):
-    urls = []
-    if job.get("company_url"):
-        urls.append(job["company_url"])
-    slug = company_slug(job.get("company"))
-    if slug:
-        urls.extend(
-            [
-                f"https://www.linkedin.com/company/{slug}",
-                f"https://in.linkedin.com/company/{slug}",
-            ]
-        )
-    deduped = []
-    for url in urls:
-        if url and url not in deduped:
-            deduped.append(url)
-    return deduped
 
 
 def score_profile(profile, job):
@@ -11732,8 +11686,6 @@ def is_company_employee_section_profile(profile, job):
 def enrich_candidate_profile(profile, job):
     text = " ".join([profile.get("headline", ""), profile.get("summary", "")])
     profile["linkedin_handle"] = linkedin_handle(profile.get("linkedin_url"))
-    profile["location"] = infer_profile_location(text)
-    profile["skills"] = candidate_skill_tags(profile, job)
     profile["profile_image_url"] = profile.get("profile_image_url") or avatar_url(profile.get("name"))
     try:
         page = fetch_job_page(profile["linkedin_url"])
@@ -11786,102 +11738,6 @@ def score_candidate_profile(profile, job):
     if not reasons:
         reasons.append("Public profile has partial role context")
     return max(1, min(98, score)), reasons[:4]
-
-
-def extract_company_employee_profiles(job):
-    profiles = []
-    seen = set()
-    company = job.get("company") or ""
-    for company_url in company_page_candidates(job):
-        try:
-            page = fetch_job_page(company_url)
-        except (HTTPError, URLError, TimeoutError, ValueError):
-            continue
-        marker = f"Employees at {company}"
-        start = page.find(marker)
-        section = page[start : start + 16000] if start >= 0 else page
-        for match in re.finditer(
-            r'<a href="([^"]*linkedin\.com/in/[^"]+)"[^>]*data-tracking-control-name="org-employees"[^>]*>(.*?)</a>',
-            section,
-            flags=re.I | re.S,
-        ):
-            linkedin_url = clean_linkedin_url(match.group(1))
-            if linkedin_url in seen:
-                continue
-            inner = match.group(2)
-            text = clean_text(inner)
-            image_match = re.search(r'data-delayed-url="([^"]+)"', inner)
-            profile = {
-                "id": f"profile_{len(profiles) + 1}",
-                "name": text or "LinkedIn profile",
-                "headline": f"Employee at {company}",
-                "summary": f"Visible in the Employees at {company} section on LinkedIn.",
-                "company": company,
-                "linkedin_url": linkedin_url,
-                "email": None,
-                "phone": None,
-                "profile_image_url": html.unescape(image_match.group(1)) if image_match else None,
-                "source": "LinkedIn company employee section",
-            }
-            profile["match_score"], profile["match_reasons"] = score_profile(profile, job)
-            profiles.append(profile)
-            seen.add(linkedin_url)
-    return profiles
-
-
-def extract_search_profiles(job, existing_urls):
-    company = job.get("company") or ""
-    role = job.get("role") or ""
-    queries = [
-        f'site:linkedin.com/in "{company}" "{role}"',
-        f'site:linkedin.com/in "{company}" recruiter',
-        f'site:linkedin.com/in "{company}" founder',
-        f'site:linkedin.com/in "{company}" "business development"',
-        f'site:linkedin.com/in "{company}"',
-    ]
-    profiles = []
-    seen = set(existing_urls)
-    for query in queries:
-        try:
-            page = fetch_public_search(query)
-        except (HTTPError, URLError, TimeoutError, ValueError):
-            continue
-        for item in re.finditer(r"<item>(.*?)</item>", page, flags=re.I | re.S):
-            block = item.group(1)
-            title_match = re.search(r"<title>(.*?)</title>", block, flags=re.I | re.S)
-            link_match = re.search(r"<link>(.*?)</link>", block, flags=re.I | re.S)
-            description_match = re.search(r"<description>(.*?)</description>", block, flags=re.I | re.S)
-            if not link_match:
-                continue
-            url = clean_linkedin_url(clean_text(link_match.group(1)))
-            if "linkedin.com/in/" not in url or url in seen:
-                continue
-            title = re.sub(r"\s*\|\s*LinkedIn.*$", "", clean_text(title_match.group(1) if title_match else "LinkedIn profile"), flags=re.I)
-            description = clean_text(description_match.group(1) if description_match else "")
-            name = title.split(" - ")[0].strip() or "LinkedIn profile"
-            headline = " - ".join(title.split(" - ")[1:]).strip() or description[:140] or f"Public LinkedIn result related to {company}"
-            profile = {
-                "id": f"profile_search_{len(profiles) + 1}",
-                "name": name,
-                "headline": headline,
-                "summary": description or f"Public search result mentioning {company}.",
-                "company": company,
-                "linkedin_url": url,
-                "email": None,
-                "phone": None,
-                "profile_image_url": None,
-                "source": "Public web search result",
-            }
-            profile["match_score"], profile["match_reasons"] = score_profile(profile, job)
-            profiles.append(profile)
-            seen.add(url)
-            if len(profiles) >= 8:
-                return profiles
-    return profiles
-
-
-def search_public_profiles(job):
-    return search_candidate_profiles(job)
 
 
 def candidate_search_queries(job):
@@ -12089,16 +11945,6 @@ def build_contact_routes(job):
     return routes
 
 
-def live_job_response(job):
-    return {
-        "job": job,
-        "matches": [],
-        "contacts": job.get("contact_routes") or build_contact_routes(job),
-        "profiles": job.get("profiles", []),
-        "notice": "This is a live job, so ReferAI is not showing seeded demo candidates or fake referrers. Use the real job source or LinkedIn search routes to contact actual people.",
-    }
-
-
 def find_user(user_id):
     row = db_query_one("SELECT * FROM users WHERE id=?", (user_id,))
     return _deserialize_user(row) if row else None
@@ -12142,7 +11988,6 @@ def registered_employees():
     return [_deserialize_user(r) for r in db_query("SELECT * FROM users")]
 
 
-
 def user_profile(user):
     skills = user.get("skills", [])
     if isinstance(skills, str):
@@ -12171,10 +12016,6 @@ def user_profile(user):
     }
 
 
-
-
-
-
 def filter_profiles(profiles, search="", skill="", role=""):
     search_tokens = public_text_tokens(search)
     skill_text = (skill or "").lower()
@@ -12195,20 +12036,11 @@ def filter_profiles(profiles, search="", skill="", role=""):
     return filtered
 
 
-
-
-
-
-
-
 def find_job(job_id):
     if not job_id:
         return None
     row = db_query_one("SELECT * FROM jobs WHERE id=?", (job_id,))
     return _deserialize_job(row) if row else None
-
-
-
 
 
 def company_matches(left, right):
@@ -12217,26 +12049,9 @@ def company_matches(left, right):
     return bool(left_tokens and right_tokens and left_tokens.intersection(right_tokens))
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 @app.route("/")
 def home():
-    return jsonify({"message": "ReferAI backend running", "version": "2.0"})
+    return jsonify({"message": "ReferIn backend running", "version": "2.0"})
 
 
 @app.route("/api/health")
@@ -12369,7 +12184,6 @@ def user_directory():
     })
 
 
-
 @app.route("/api/connections", methods=["GET", "POST"])
 def connections():
     if request.method == "GET":
@@ -12411,9 +12225,6 @@ def connections():
     return jsonify({"connection": conn, "created": True}), 201
 
 
-
-
-
 def _gh_request(path):
     """Make an authenticated GitHub API request. Returns parsed JSON or None on error."""
     if not GITHUB_PAT:
@@ -12423,7 +12234,7 @@ def _gh_request(path):
         "Authorization": f"Bearer {GITHUB_PAT}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "ReferAI/1.0",
+        "User-Agent": "ReferIn/1.0",
     })
     try:
         with urlopen(req, timeout=10) as r:
@@ -12484,8 +12295,6 @@ _SUBSIDIARY_TO_ORG = {
     "shazam":           "apple",
     # Google → Fitbit
     "fitbit":           "google",
-    # Other notable ones
-    "instagram":        "facebook",
 }
 
 # Step 3: Canonical company name (slug form) → GitHub org.
@@ -13334,7 +13143,7 @@ def career_companion():
     ]
 
     llm = free_llm_generate(
-        f"You are ReferAI career coach. Give 3 concise practical tips for {user.get('name', 'a candidate')} "
+        f"You are ReferIn career coach. Give 3 concise practical tips for {user.get('name', 'a candidate')} "
         f"targeting {job.get('role')} at {job.get('company')}. "
         f"Their skills: {', '.join(list(user_skills)[:5])}. Missing: {', '.join(list(missing)[:3]) or 'none'}."
     )
@@ -13346,7 +13155,6 @@ def career_companion():
         "llm": {"active": llm["active"], "provider": llm["provider"], "model": llm["model"]},
         "agents": agents,
     }})
-
 
 
 @app.route("/api/proof/submit", methods=["POST"])
@@ -13444,7 +13252,6 @@ def decide_referral(request_id):
     return jsonify({"request": hydrate_request(referral_request)})
 
 
-
 @app.route("/api/generate-message", methods=["POST"])
 def generate_message():
     payload = request.get_json(silent=True) or {}
@@ -13468,7 +13275,7 @@ def generate_message():
     fallback_message = (
         f"Hi {emp_name},\n\n"
         f"I am applying for the {job.get('role', 'this role')} role at {job.get('company', 'your company')}. "
-        f"ReferAI matched me with you as a potential referrer based on your background.\n\n"
+        f"ReferIn matched me with you as a potential referrer based on your background.\n\n"
         f"My key skills are: {user_skills}.\n\n"
         "Would you be open to a quick chat or considering a referral?\n\n"
         f"Thanks,\n{user_name}"
@@ -13559,6 +13366,114 @@ def update_profile():
         ),
     )
     return jsonify({"user": find_user(user_id)})
+
+
+def fetch_job_recommendations(user, num_results=10, country="in", date_posted="month",
+                              remote_only=False, role_override="", company_override=""):
+    """Search JSearch for jobs matching a user's target role, skills, and company interests."""
+    if not RAPIDAPI_KEY:
+        return []
+
+    target_role = role_override or (user.get("target_role") or user.get("current_role") or "").strip()
+
+    if not target_role and not company_override:
+        return []
+
+    if target_role and company_override:
+        # Specific: role + company. JSearch responds well to "X at Y" text pattern.
+        query = f"{target_role} at {company_override}"
+    elif target_role:
+        # Broad role search with a skill hint
+        skill_hint = " ".join(jl(user.get("skills", "[]"))[:2])
+        query = " ".join(filter(None, [target_role, skill_hint]))
+    else:
+        # Company-only — "software engineer at X" returns far better results than
+        # just "X" (tested: bare company name returns unrelated employers ~90% of results)
+        query = f"software engineer at {company_override}"
+
+    # Fetch 2 pages so post-filtering has more candidates to choose from
+    p = {
+        "query":      query,
+        "page":       "1",
+        "num_pages":  "2" if company_override else "1",
+        "country":    country,
+        "language":   "en",
+        "date_posted": date_posted,
+    }
+    if remote_only:
+        p["remote_jobs_only"] = "true"
+    params = urlencode(p)
+    req = Request(
+        f"{JSEARCH_URL}?{params}",
+        headers={
+            "X-RapidAPI-Key": RAPIDAPI_KEY,
+            "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
+        },
+    )
+    try:
+        with urlopen(req, timeout=15) as r:
+            data = json.loads(r.read())
+        raw_jobs = data.get("data") or []
+    except Exception:
+        return []
+
+    # Post-filter: when a specific company was requested, drop results that
+    # don't mention it in the employer_name field.
+    if company_override:
+        raw_jobs = [
+            j for j in raw_jobs
+            if company_override.lower() in (j.get("employer_name") or "").lower()
+        ]
+
+    results = []
+    for jr in raw_jobs[:num_results]:
+        results.append({
+            "job_id":          jr.get("job_id", ""),
+            "title":           jr.get("job_title", ""),
+            "company":         jr.get("employer_name", ""),
+            "company_logo":    jr.get("employer_logo", ""),
+            "location":        jr.get("job_location") or jr.get("job_city") or "",
+            "employment_type": jr.get("job_employment_type", ""),
+            "work_arrangement":jr.get("work_arrangement", ""),
+            "apply_link":      jr.get("job_apply_link", ""),
+            "posted_at":       jr.get("job_posted_at", ""),
+            "min_salary":      jr.get("job_min_salary"),
+            "max_salary":      jr.get("job_max_salary"),
+            "salary_period":   jr.get("job_salary_period", ""),
+            "skills":          list(jr.get("preferred_technologies") or []),
+            "seniority":       jr.get("seniority_level", ""),
+            "description":     (jr.get("job_description") or "")[:400],
+            "highlights":      jr.get("job_highlights") or {},
+        })
+    return results
+
+
+@app.route("/api/jobs/recommendations", methods=["GET"])
+def job_recommendations():
+    user_id = request.args.get("user_id")
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 400
+    user = find_user(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if not RAPIDAPI_KEY:
+        return jsonify({"jobs": [], "notice": "RAPIDAPI_KEY not configured"}), 200
+
+    country     = request.args.get("country", "in")
+    date_posted = request.args.get("date_posted", "month")
+    remote_only = request.args.get("remote_only", "false").lower() == "true"
+    role        = request.args.get("role", "").strip()
+    company     = request.args.get("company", "").strip()
+
+    jobs = fetch_job_recommendations(
+        user,
+        country=country,
+        date_posted=date_posted,
+        remote_only=remote_only,
+        role_override=role,
+        company_override=company,
+    )
+    return jsonify({"jobs": jobs, "query_role": role or user.get("target_role") or user.get("current_role")})
 
 
 def hydrate_requests():

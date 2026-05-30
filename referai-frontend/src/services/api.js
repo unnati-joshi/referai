@@ -11,15 +11,11 @@ const request = async (path, options = {}) => {
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({}));
-    throw new Error(error.error || "ReferAI service request failed");
+    throw new Error(error.error || "ReferIn service request failed");
   }
 
   return res.json();
 };
-
-export const getHealth = () => request("/api/health");
-
-export const getMarketplace = () => request("/api/marketplace");
 
 export const startPhoneAuth = ({ phone }) =>
   request("/api/auth/phone/start", {
@@ -51,12 +47,6 @@ export const getMatches = ({ jobId, job, userId }) =>
     body: JSON.stringify({ job_id: jobId, job, user_id: userId }),
   });
 
-export const submitProof = ({ userId, solution }) =>
-  request("/api/proof/submit", {
-    method: "POST",
-    body: JSON.stringify({ user_id: userId, solution }),
-  });
-
 export const createReferralRequest = ({ userId, employeeId, jobId, job, message }) =>
   request("/api/referral-requests", {
     method: "POST",
@@ -67,28 +57,6 @@ export const createReferralRequest = ({ userId, employeeId, jobId, job, message 
       job,
       message,
     }),
-  });
-
-export const getReferralRequests = () => request("/api/referral-requests");
-
-export const submitReferralDecision = ({ requestId, decision, notes }) =>
-  request(`/api/referral-requests/${requestId}/decision`, {
-    method: "POST",
-    body: JSON.stringify({ decision, notes }),
-  });
-
-export const getUsers = (filters = {}) => {
-  const params = new URLSearchParams();
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value) params.set(key, value);
-  });
-  return request(`/api/users${params.toString() ? `?${params}` : ""}`);
-};
-
-export const createConnection = ({ userId, employeeId, connectionType = "cold" }) =>
-  request("/api/connections", {
-    method: "POST",
-    body: JSON.stringify({ user_id: userId, employee_id: employeeId, connection_type: connectionType }),
   });
 
 export const generateMessage = ({ userId, employeeId, jobId, job }) =>
@@ -121,6 +89,11 @@ export const uploadResume = (file) => {
       if (!res.ok) return res.json().then((e) => { throw new Error(e.error || "Upload failed"); });
       return res.json();
     });
+};
+
+export const getJobRecommendations = ({ userId, country = "in", datePosted = "month", remoteOnly = false, role = "", company = "" }) => {
+  const params = new URLSearchParams({ user_id: userId, country, date_posted: datePosted, remote_only: remoteOnly, role, company });
+  return request(`/api/jobs/recommendations?${params}`);
 };
 
 export const updateProfile = ({ userId, skills, education, experience, interests, targetCompanies, currentRole, targetRole, summary }) =>

@@ -1,26 +1,37 @@
 import { useEffect, useState } from "react";
 import Layout from "./components/common/Layout";
 import Auth from "./pages/Auth";
+import Jobs from "./pages/Jobs";
 import Landing from "./pages/Landing";
 import Profile from "./pages/Profile";
 import Student from "./pages/Student";
+
+const DARK_THEMES = new Set(["dark", "midnight", "violet"]);
+const THEMES = new Set(["light", "dark", "midnight", "violet", "sand", "forest"]);
 
 function App() {
   const [view, setView] = useState("landing");
   const [authMode, setAuthMode] = useState("login");
   const [page, setPage] = useState("opportunities");
+  const [pendingJobDesc, setPendingJobDesc] = useState("");
   const [user, setUser] = useState(null);
-  const [theme, setTheme] = useState(() => localStorage.getItem("referai-theme") || "light");
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = localStorage.getItem("referai-theme");
+    return THEMES.has(savedTheme) ? savedTheme : "light";
+  });
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    localStorage.setItem("referai-theme", theme);
+    const root = document.documentElement;
+    const nextTheme = THEMES.has(theme) ? theme : "light";
+    // Remove all known theme classes then apply new one
+    root.classList.remove("light", "dark", "midnight", "violet", "sand", "forest");
+    root.classList.add(nextTheme);
+    // Keep Tailwind's `dark` class in sync so dark: variants work
+    root.classList.toggle("dark", DARK_THEMES.has(nextTheme));
+    localStorage.setItem("referai-theme", nextTheme);
   }, [theme]);
 
-  const openAuth = (mode) => {
-    setAuthMode(mode);
-    setView("auth");
-  };
+  const openAuth = (mode) => { setAuthMode(mode); setView("auth"); };
 
   const handleAuth = (account) => {
     setUser(account);
@@ -30,15 +41,10 @@ function App() {
 
   const handleUserUpdate = (updatedUser) => setUser(updatedUser);
 
-  const logout = () => {
-    setUser(null);
-    setView("landing");
-  };
-
-  const toggleTheme = () => setTheme((current) => (current === "dark" ? "light" : "dark"));
+  const logout = () => { setUser(null); setView("landing"); };
 
   if (view === "landing") {
-    return <Landing onAuth={openAuth} theme={theme} onToggleTheme={toggleTheme} />;
+    return <Landing onAuth={openAuth} theme={theme} onToggleTheme={() => setTheme((t) => DARK_THEMES.has(t) ? "light" : "dark")} />;
   }
 
   if (view === "auth") {
@@ -48,7 +54,7 @@ function App() {
         onSubmit={handleAuth}
         onBack={() => setView("landing")}
         theme={theme}
-        onToggleTheme={toggleTheme}
+        onToggleTheme={() => setTheme((t) => DARK_THEMES.has(t) ? "light" : "dark")}
       />
     );
   }
@@ -60,11 +66,17 @@ function App() {
       user={user}
       onLogout={logout}
       theme={theme}
-      onToggleTheme={toggleTheme}
+      onSetTheme={setTheme}
     >
-      {page === "profile"
-        ? <Profile user={user} onUserUpdate={handleUserUpdate} />
-        : <Student user={user} />}
+      <div className={page === "opportunities" ? "" : "hidden"}>
+        <Student user={user} pendingJobDesc={pendingJobDesc} onClearPendingJobDesc={() => setPendingJobDesc("")} />
+      </div>
+      <div className={page === "jobs" ? "" : "hidden"}>
+        <Jobs user={user} onFindReferrer={(desc) => { setPendingJobDesc(desc); setPage("opportunities"); }} />
+      </div>
+      <div className={page === "profile" ? "" : "hidden"}>
+        <Profile user={user} onUserUpdate={handleUserUpdate} />
+      </div>
     </Layout>
   );
 }

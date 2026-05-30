@@ -135,7 +135,7 @@ const Profile = ({ user, onUserUpdate }) => {
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 md:px-8">
+    <div className="mx-auto max-w-4xl px-4 py-8 md:px-8">
       {extraction && (
         <ExtractionPreview
           extracted={extraction.extracted}
@@ -145,18 +145,19 @@ const Profile = ({ user, onUserUpdate }) => {
         />
       )}
 
-      <div className="mb-8">
-        <h2 className="text-3xl font-black tracking-tight text-main">Profile</h2>
-        <p className="mt-2 text-base text-muted">
-          Your skills, interests, and target companies improve referral matching. Upload your resume to fill these in automatically.
+      <div className="page-intro mb-8">
+        <p className="text-xs font-black uppercase text-muted">Referral profile</p>
+        <h2 className="mt-2 text-3xl font-black tracking-tight text-main md:text-5xl">Make every match easier to justify.</h2>
+        <p className="mt-4 max-w-2xl text-base leading-7 text-muted">
+          Add the skills, experience, education, and target companies ReferIn should use to rank referrers and personalize outreach.
         </p>
       </div>
 
       {/* Resume upload */}
-      <section className="surface-flat mb-6 p-6">
+      <section className="surface-flat app-elevated mb-6 p-6">
         <p className="text-sm font-black uppercase tracking-wide text-muted">Resume</p>
         <p className="mt-2 text-sm leading-6 text-muted">
-          Upload a PDF or DOCX. Skills, education, experience, and interests are extracted automatically and added to your profile — they won't overwrite anything you've already added.
+          Upload a PDF or DOCX to extract skills, education, experience, and interests. Existing profile details stay intact.
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button

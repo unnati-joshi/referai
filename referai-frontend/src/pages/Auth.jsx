@@ -1,7 +1,19 @@
 import { useState } from "react";
+import BrandLogo from "../components/common/BrandLogo";
+import ReferralGraph from "../components/common/ReferralGraph";
 import { authLogin, authSignup, startPhoneAuth } from "../services/api";
 
+const DARK_THEMES = new Set(["dark", "midnight", "violet"]);
+
+const normalizePhoneInput = (phone) => {
+  const trimmed = (phone || "").trim().replace(/[\s-]/g, "");
+  if (/^\d{10}$/.test(trimmed)) return `+91${trimmed}`;
+  if (/^91\d{10}$/.test(trimmed)) return `+${trimmed}`;
+  return trimmed;
+};
+
 const Auth = ({ mode, onSubmit, onBack, theme, onToggleTheme }) => {
+  const isDarkTheme = DARK_THEMES.has(theme);
   const [authMode, setAuthMode] = useState(mode);
   const [form, setForm] = useState({
     name: "",
@@ -25,10 +37,11 @@ const Auth = ({ mode, onSubmit, onBack, theme, onToggleTheme }) => {
     if (!form.email.trim()) { setError("Email address is required."); return; }
     if (!form.password) { setError("Password is required."); return; }
     if (isSignup && !form.name.trim()) { setError("Full name is required."); return; }
-    if (isSignup && !form.phone.trim()) { setError("Phone number is required. We use it to verify your identity."); return; }
+    const normalizedPhone = normalizePhoneInput(form.phone);
+    if (isSignup && !normalizedPhone) { setError("Phone number is required. We use it to verify your identity."); return; }
     setLoading(true);
     try {
-      const response = isSignup ? await authSignup(form) : await authLogin(form);
+      const response = isSignup ? await authSignup({ ...form, phone: normalizedPhone }) : await authLogin(form);
       onSubmit(response.user);
     } catch (err) {
       setError(err.message);
@@ -40,8 +53,14 @@ const Auth = ({ mode, onSubmit, onBack, theme, onToggleTheme }) => {
   const sendOtp = async () => {
     setError("");
     setStatus("");
+    const normalizedPhone = normalizePhoneInput(form.phone);
+    if (!normalizedPhone) {
+      setError("Enter your phone number first. 10-digit India numbers are okay.");
+      return;
+    }
     try {
-      const response = await startPhoneAuth({ phone: form.phone });
+      const response = await startPhoneAuth({ phone: normalizedPhone });
+      setForm((current) => ({ ...current, phone: normalizedPhone }));
       setStatus(response.message || "OTP sent.");
     } catch (err) {
       setError(err.message);
@@ -49,43 +68,38 @@ const Auth = ({ mode, onSubmit, onBack, theme, onToggleTheme }) => {
   };
 
   return (
-    <div className="page-bg flex min-h-screen flex-col">
-      <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 md:px-8">
+    <div className="auth-shell page-bg flex min-h-screen flex-col">
+      <header className="auth-header mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 md:px-8">
         <button onClick={onBack} className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950 text-sm font-black text-white dark:bg-white dark:text-slate-950">
-            R
-          </span>
-          <span className="text-lg font-black tracking-tight text-main">ReferAI</span>
+          <BrandLogo />
         </button>
-        <button onClick={onToggleTheme} className="btn-secondary px-3 py-2 text-sm">
-          {theme === "dark" ? "Light" : "Dark"}
+        <button onClick={onToggleTheme} className="auth-theme-toggle px-3 py-2 text-sm">
+          {isDarkTheme ? "Light" : "Dark"}
         </button>
       </header>
 
       <main className="flex flex-1 items-center justify-center px-5 py-10">
-        <div className="grid w-full max-w-5xl overflow-hidden surface lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="hidden border-r border-app soft p-10 lg:block">
-            <p className="text-sm font-black uppercase tracking-wide text-muted">Welcome</p>
-            <h1 className="mt-4 text-4xl font-black leading-tight text-main">
-              Build referrals around proof, not cold messages.
-            </h1>
-            <div className="mt-8 space-y-4">
-              {["Smart matching", "Verified referrers", "Referral tracking"].map((item) => (
-                <div key={item} className="surface-flat p-4">
-                  <p className="font-black text-main">{item}</p>
-                  <p className="mt-1 text-sm text-muted">Available after login.</p>
-                </div>
-              ))}
+        <div className="auth-panel grid w-full max-w-6xl overflow-hidden lg:grid-cols-[1.02fr_0.98fr]">
+          <div className="auth-art hidden lg:block">
+            <div className="auth-art-top">
+              <div>
+                <p className="text-sm font-black uppercase tracking-wide">ReferIn</p>
+                <h1>Find your warmest way in.</h1>
+              </div>
             </div>
+            <ReferralGraph compact />
           </div>
 
-          <form onSubmit={handleSubmit} className="p-6 md:p-10">
+          <form onSubmit={handleSubmit} className="auth-form p-6 md:p-10">
             <p className="text-sm font-black uppercase tracking-wide text-muted">
               {isSignup ? "Create account" : "Log in"}
             </p>
-            <h2 className="mt-3 text-3xl font-black text-main">
-              {isSignup ? "Start using ReferAI" : "Welcome back"}
+            <h2 className="mt-3 text-3xl font-black text-main md:text-4xl">
+              {isSignup ? "Start with your network" : "Welcome back"}
             </h2>
+            <p className="mt-3 text-sm leading-6 text-muted">
+              {isSignup ? "Build a profile that helps ReferIn find better referrers." : "Continue matching jobs to people who can actually help."}
+            </p>
 
             <div className="mt-8 space-y-4">
               {isSignup && (
@@ -125,7 +139,6 @@ const Auth = ({ mode, onSubmit, onBack, theme, onToggleTheme }) => {
                 />
               </label>
 
-
               {isSignup && (
                 <>
                   <label className="block">
@@ -142,6 +155,7 @@ const Auth = ({ mode, onSubmit, onBack, theme, onToggleTheme }) => {
                     <span className="mb-2 block text-sm font-bold text-main">
                       Phone number <span className="text-rose-500">*</span>
                     </span>
+                    <p className="mb-2 text-xs text-muted">Use +91 with country code, or type a 10-digit India number.</p>
                     <div className="flex flex-col gap-3 sm:flex-row">
                       <input
                         className="field"
@@ -167,7 +181,6 @@ const Auth = ({ mode, onSubmit, onBack, theme, onToggleTheme }) => {
                   </label>
                 </>
               )}
-
             </div>
 
             {error && <p className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">{error}</p>}
@@ -178,7 +191,7 @@ const Auth = ({ mode, onSubmit, onBack, theme, onToggleTheme }) => {
             </button>
 
             <p className="mt-6 text-center text-sm text-muted">
-              {isSignup ? "Already have an account?" : "New to ReferAI?"}{" "}
+              {isSignup ? "Already have an account?" : "New to ReferIn?"}{" "}
               <button
                 type="button"
                 onClick={() => {

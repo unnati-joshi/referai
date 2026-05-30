@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const providerLabel = { deepseek: "DeepSeek AI", gemini: "Gemini AI", regex: "keyword matching" };
+const providerLabel = { deepseek: "DeepSeek AI", regex: "keyword matching" };
 
 const ExtractionPreview = ({ extracted, provider, onConfirm, onCancel }) => {
   const [skills, setSkills] = useState(extracted.skills || []);
@@ -24,7 +24,7 @@ const ExtractionPreview = ({ extracted, provider, onConfirm, onCancel }) => {
           <div>
             <h2 className="text-xl font-black text-main">Review extracted data</h2>
             <p className="mt-1 text-sm text-muted">
-              Extracted by {providerLabel[provider] || "keyword matching"}.{provider === "regex" ? " Add a DeepSeek or Gemini API key for better results." : ""}{" "}
+              Extracted by {providerLabel[provider] || "keyword matching"}.{provider === "regex" ? " Add a DeepSeek API key for better results." : ""}{" "}
               Uncheck anything you don't want added.
             </p>
           </div>
